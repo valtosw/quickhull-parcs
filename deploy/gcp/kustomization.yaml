@@ -1,0 +1,18 @@
+# Registry and tag tokens are substituted by deploy/scripts/deploy-gcp.ps1 in a temporary copy.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../base
+images:
+  - {name: parcs8/daemon, newName: __REGISTRY__/daemon, newTag: __IMAGE_TAG__}
+  - {name: parcs8/host, newName: __REGISTRY__/host, newTag: __IMAGE_TAG__}
+  - {name: parcs8/portal, newName: __REGISTRY__/portal, newTag: __IMAGE_TAG__}
+patches:
+  # job storage: RWX volume from the NFS-Ganesha provisioner (storage class created by its
+  # Helm chart, values in deploy/gcp/nfs-values.yaml)
+  # Keep the shared job volume smaller than the NFS server disk so the provisioner has
+  # space for filesystem metadata.
+  - target: {kind: PersistentVolumeClaim, name: parcs-storage}
+    patch: |-
+      - {op: add, path: /spec/storageClassName, value: parcs-rwx}
+      - {op: replace, path: /spec/resources/requests/storage, value: 10Gi}

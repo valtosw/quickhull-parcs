@@ -1,0 +1,22 @@
+* text=auto
+
+*.cs text eol=lf
+*.csproj text eol=lf
+*.slnx text eol=lf
+*.ps1 text eol=lf
+*.Dockerfile text eol=lf
+.dockerignore text eol=lf
+.gitignore text eol=lf
+.gitattributes text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+*.patch text eol=lf
+*.md text eol=lf
+*.json text eol=lf
+*.csv text eol=lf
+*.svg text eol=lf
+*.html text eol=lf
+
+*.png binary
+*.pdf binary
+*.zip binary

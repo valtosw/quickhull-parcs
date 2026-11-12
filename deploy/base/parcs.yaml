@@ -1,0 +1,206 @@
+# PARCS static deployment: the master node hosts the API, portal, and database; each worker
+# node hosts one daemon. The GKE overlay supplies the shared storage class and image registry.
+# The shared ReadWriteMany volume stores uploaded modules and job inputs/outputs.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: parcs-storage
+spec:
+  accessModes: [ReadWriteMany]
+  resources: {requests: {storage: 10Gi}}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: parcs-daemon-headless
+spec:
+  clusterIP: None
+  selector: {app: parcs-daemon}
+  ports: [{name: daemon, port: 1111, targetPort: 1111}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: parcs-daemon
+spec:
+  replicas: 4
+  # one daemon per worker node (anti-affinity) leaves no room for a surge pod during a
+  # rolling update, so replace them all at once
+  strategy: {type: Recreate}
+  selector: {matchLabels: {app: parcs-daemon}}
+  template:
+    metadata:
+      labels: {app: parcs-daemon}
+    spec:
+      nodeSelector: {parcs-role: worker}
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector: {matchLabels: {app: parcs-daemon}}
+              topologyKey: kubernetes.io/hostname
+      containers:
+        - name: parcs-daemon
+          image: parcs8/daemon:local
+          imagePullPolicy: IfNotPresent
+          ports: [{containerPort: 1111}]
+          resources:
+            requests: {cpu: "1", memory: 512Mi}
+            limits: {cpu: "1", memory: 2Gi}
+          env:
+            - {name: Hosting__Environment, value: Kubernetes}
+            - {name: Kubernetes__NamespaceName, value: default}
+            - {name: Kubernetes__DaemonsHeadlessServiceName, value: parcs-daemon-headless}
+            - {name: Scaling__Mode, value: Static}
+            - {name: HostApi__Uri, value: parcs-hostapi-internal}
+            - {name: Elasticsearch__BaseUrl, value: ""}   # Elasticsearch off (patches/0001), console logs
+          volumeMounts: [{name: storage, mountPath: /var/lib/storage}]
+      volumes:
+        - name: storage
+          persistentVolumeClaim: {claimName: parcs-storage}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: parcs-hostapi
+spec:
+  selector: {app: parcs-hostapi}
+  ports: [{name: http, port: 80, targetPort: 80}]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: parcs-hostapi-internal
+spec:
+  selector: {app: parcs-hostapi}
+  ports: [{name: http, port: 80, targetPort: 80}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: parcs-hostapi
+spec:
+  replicas: 1
+  # the master node has no spare CPU for a second host pod during a rolling update
+  strategy: {type: Recreate}
+  selector: {matchLabels: {app: parcs-hostapi}}
+  template:
+    metadata:
+      labels: {app: parcs-hostapi}
+    spec:
+      nodeSelector: {parcs-role: master}
+      tolerations: [{key: node-role.kubernetes.io/control-plane, operator: Exists, effect: NoSchedule}]
+      containers:
+        - name: parcs-hostapi
+          image: parcs8/host:local
+          imagePullPolicy: IfNotPresent
+          ports: [{containerPort: 80}]
+          # Wait for database initialization and host migrations before routing jobs.
+          startupProbe:
+            httpGet: {path: /health, port: 80}
+            periodSeconds: 3
+            failureThreshold: 20
+          livenessProbe:
+            httpGet: {path: /health, port: 80}
+            periodSeconds: 10
+          readinessProbe:
+            httpGet: {path: /health, port: 80}
+            periodSeconds: 5
+          resources:
+            requests: {cpu: "1", memory: 256Mi}
+            limits: {cpu: "1", memory: 1Gi}
+          env:
+            - {name: ASPNETCORE_URLS, value: "http://+:80"}
+            - {name: Hosting__Environment, value: Kubernetes}
+            - {name: Kubernetes__NamespaceName, value: default}
+            - {name: Kubernetes__DaemonsHeadlessServiceName, value: parcs-daemon-headless}
+            - {name: Scaling__Mode, value: Static}
+            - {name: Database__HostName, value: parcs-database}
+            - {name: Database__DatabaseName, value: parcs}
+            - {name: Database__Username, value: parcs_admin}
+            - name: Database__Password
+              valueFrom:
+                secretKeyRef:
+                  name: parcs-database
+                  key: password
+            - {name: Database__Port, value: "5432"}
+            - {name: Elasticsearch__BaseUrl, value: ""}   # Elasticsearch off (patches/0001), console logs
+          volumeMounts: [{name: storage, mountPath: /var/lib/storage}]
+      volumes:
+        - name: storage
+          persistentVolumeClaim: {claimName: parcs-storage}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: parcs-portal
+spec:
+  selector: {app: parcs-portal}
+  ports: [{name: http, port: 80, targetPort: 80}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: parcs-portal
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: parcs-portal}}
+  template:
+    metadata:
+      labels: {app: parcs-portal}
+    spec:
+      nodeSelector: {parcs-role: master}
+      tolerations: [{key: node-role.kubernetes.io/control-plane, operator: Exists, effect: NoSchedule}]
+      containers:
+        - name: parcs-portal
+          image: parcs8/portal:local
+          imagePullPolicy: IfNotPresent
+          ports: [{containerPort: 80}]
+          resources:
+            requests: {cpu: 100m, memory: 128Mi}
+            limits: {cpu: 500m, memory: 512Mi}
+          env:
+            - {name: ASPNETCORE_URLS, value: "http://+:80"}
+            - {name: Host__Uri, value: parcs-hostapi-internal}
+            - {name: Portal__Uri, value: parcs-portal}
+            - {name: Portal__SignalrUri, value: parcs-portal}
+            - {name: Elasticsearch__BaseUrl, value: ""}   # Elasticsearch off (patches/0001), console logs
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: parcs-database
+spec:
+  selector: {app: parcs-database}
+  ports: [{name: postgres, port: 5432, targetPort: 5432}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: parcs-database
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: parcs-database}}
+  template:
+    metadata:
+      labels: {app: parcs-database}
+    spec:
+      nodeSelector: {parcs-role: master}
+      tolerations: [{key: node-role.kubernetes.io/control-plane, operator: Exists, effect: NoSchedule}]
+      containers:
+        - name: parcs-database
+          image: postgres:16
+          env:
+            - {name: POSTGRES_USER, value: parcs_admin}
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: parcs-database
+                  key: password
+            - {name: POSTGRES_DB, value: parcs}
+          ports: [{containerPort: 5432}]
+          resources:
+            requests: {cpu: 100m, memory: 128Mi}
+            limits: {cpu: 500m, memory: 512Mi}
+          volumeMounts: [{name: data, mountPath: /var/lib/postgresql/data}]
+      volumes:
+        - {name: data, emptyDir: {}}
