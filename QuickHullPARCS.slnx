@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="src/QuickHull.Geometry/QuickHull.Geometry.csproj" />
+  <Project Path="tools/QuickHull.Sequential/QuickHull.Sequential.csproj" />
+  <Project Path="modules/QuickHull.PARCS/QuickHull.PARCS.csproj" />
+</Solution>
