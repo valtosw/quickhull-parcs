@@ -131,7 +131,7 @@ For the worker-count comparison, run the same job for each `PointsNumber`: **1, 
 
 ## 6. Run the sequential baseline
 
-Run the sequential Job on a worker node with the same point count, seed, warmup, and repetitions as the PARCS jobs:
+Run the sequential Job on a worker node with the same point count, seed, warmup, and repetitions as the PARCS jobs. The Job requests 500m CPU so it can schedule beside the daemon on an e2-standard-2 worker and has a 1-vCPU limit matching the daemon's compute cap:
 
 ```powershell
 ./deploy/scripts/run-sequential.ps1 -ProjectId $PROJECT_ID -PointCount 500000 -Seed 42 -Warmup 1 -Repetitions 5
