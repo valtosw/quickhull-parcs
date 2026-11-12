@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Parcs.Net" Version="10.1.0">
+      <ExcludeAssets>runtime</ExcludeAssets>
+    </PackageReference>
+    <Compile Include="../../src/QuickHull.Geometry/*.cs" LinkBase="Geometry" />
+  </ItemGroup>
+</Project>
